@@ -158,15 +158,38 @@ class DjangoNewsPRFilter:
                     lambda author: author.login == raw_author['login'],
                     self.results.get_authors()))[0].is_new
 
-            author = Author(is_new=is_new, **raw_author)
+            author_name = raw_author.get('name')
+            author_login = raw_author.get('login')
+            author = Author(
+                login=author_login,
+                name=author_name,
+                is_new=is_new
+            )
 
             raw_files = item.pop('files')
             files = []
             for file in raw_files:
+                file_path = file.get('path')
+                file_additions = file.get('additions')
+                file_deletions = file.get('deletions')
                 files.append(
-                    File(**file)
+                    File(
+                        path=file_path,
+                        additions=file_additions,
+                        deletions=file_deletions
+                    )
                 )
-            pr = PR(author=author, files=files, **item)
+            
+            item_pr_number = item.get('number')
+            item_pr_title = item.get('title')
+            item_pr_url = item.get('url')
+            pr = PR(
+                title=item_pr_title,
+                number=item_pr_number,
+                url=item_pr_url,
+                author=author,
+                files=files,
+            )
             self.results.prs.append(pr)
 
         logger.info(
