@@ -153,51 +153,38 @@ class DjangoNewsPRFilter:
 
         for item in response:
             raw_author = item.pop('author')
-            if raw_author['login'] not in map(
-                    lambda author: author.login, self.results.get_authors()):
-                is_new = self._check_new_author(login=raw_author['login'])
-            else:
-                is_new = list(filter(
-                    lambda author: author.login == raw_author['login'],
-                    self.results.get_authors()))[0].is_new
-
-            author_name = raw_author.get('name')
-            author_login = raw_author.get('login')
-            author = Author(
-                login=author_login,
-                name=author_name,
-                is_new=is_new
-            )
-
-            raw_files = item.pop('files')
-            files = []
-            for file in raw_files:
-                file_path = file.get('path')
-                file_additions = file.get('additions')
-                file_deletions = file.get('deletions')
-                files.append(
-                    File(
-                        path=file_path,
-                        additions=file_additions,
-                        deletions=file_deletions
-                    )
-                )
-
-            item_pr_number = item.get('number')
-            item_pr_title = item.get('title')
-            item_pr_url = item.get('url')
-            pr = PR(
-                title=item_pr_title,
-                number=item_pr_number,
-                url=item_pr_url,
-                author=author,
-                files=files,
-            )
+            author = self._create_author(raw_author)
+            files = self._create_files(item.pop('files'))
+            pr = self._create_pr(item, author, files)
             self.results.prs.append(pr)
 
         logger.info(
             f'{len(self.results.prs)} PRs and related data were loaded.'
         )
+    def _create_author(self, raw_author):
+        author_login = raw_author.get('login')
+        author_name = raw_author.get('name')
+        if author_login not in map(lambda author: author.login, self.results.get_authors()):
+            is_new = self._check_new_author(login=author_login)
+        else:
+            is_new = list(filter(lambda author: author.login == author_login, self.results.get_authors()))[0].is_new
+        return Author(login=author_login, name=author_name, is_new=is_new)
+
+    def _create_files(self, raw_files):
+        files = []
+        for file in raw_files:
+            file_path = file.get('path')
+            file_additions = file.get('additions')
+            file_deletions = file.get('deletions')
+            files.append(File(path=file_path, additions=file_additions, deletions=file_deletions))
+        return files
+
+    def _create_pr(self, item, author, files):
+        item_pr_number = item.get('number')
+        item_pr_title = item.get('title')
+        item_pr_url = item.get('url')
+        return PR(title=item_pr_title, number=item_pr_number, url=item_pr_url, author=author, files=files)
+
 
     def _check_new_author(self, login: str) -> bool:
         # NOTE: for consistency reasons, this checks if
