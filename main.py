@@ -242,28 +242,37 @@ class DjangoNewsPRFilter:
         )
         if new_authors:
             self._write_new_contributors(md_file, new_authors)
+        else:
+            md_file.new_line()
+            md_file.new_line()
+            md_file.write(f' [comment]: <> (This is a comment. No new contributors :( )')
 
 
     def _write_new_contributors(self, md_file, new_authors):
+        num_new_authors = len(new_authors)
         md_file.write(
-            f' - including {len(new_authors)} first time '
-            f'contributors! Congratulations to '
-        )
-        for author in new_authors[:-1]:
-            md_file.write(md_file.new_inline_link(
-                author.get_url(),
-                author.name or author.login
-            ))
-            md_file.write(', ')
-        author = new_authors[-1]
-        md_file.write('and ')
-        md_file.write(md_file.new_inline_link(
-            author.get_url(),
-            author.name or author.login
-        ))
-        md_file.write(
-            f' for having their first commits merged into Django - welcome on board!'
-        )
+            f' - including {num_new_authors} first-time contributor{"s" if num_new_authors > 1 else ""}! Congratulations to ')
+        if num_new_authors == 1:
+            md_file.write(
+                md_file.new_inline_link(new_authors[0].get_url(), new_authors[0].name or new_authors[0].login))
+
+        elif num_new_authors == 2:
+            md_file.write(
+                md_file.new_inline_link(new_authors[0].get_url(), new_authors[0].name or new_authors[0].login))
+            md_file.write(f' and ')
+            md_file.write(
+                md_file.new_inline_link(new_authors[1].get_url(), new_authors[1].name or new_authors[1].login))
+
+        else:
+            for author in new_authors[:-1]:
+                md_file.write(md_file.new_inline_link(author.get_url(), author.name or author.login))
+                md_file.write(', ')
+            md_file.write('and ')
+            md_file.write(
+                md_file.new_inline_link(new_authors[-1].get_url(), new_authors[-1].name or new_authors[-1].login))
+
+        md_file.write(f' for having their first commits merged into Django - welcome on board!')
+
 
     def _write_release_prs(self, md_file):
         md_file.new_line()
