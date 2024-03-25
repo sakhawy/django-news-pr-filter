@@ -208,68 +208,64 @@ class DjangoNewsPRFilter:
     def export_md(self):
         """
         Exports the data into a .md file.
-        
+
         (very messy, should've just used normal file IO!)
         """
-        logger.info(
-            f'Exporting to {self.output_file}...'
-        )
+        logger.info(f'Exporting to {self.output_file}...')
         self._load_prs()
         prs = self.results.prs
         authors = self.results.get_authors()
         new_authors = self.results.get_new_authors()
 
-        logger.debug(
-            new_authors
-        )
+        logger.debug(new_authors)
 
         md_file = mdutils.MdUtils(file_name=self.output_file, title='Updates to Django')
-        md_file.new_header(level=1, title='Synopsis')
+        self._write_synopsis(md_file, prs, authors, new_authors)
+        self._write_release_prs(md_file)
 
-        # FIXME: this can get weird if we have few contributors!
-        # too many edge cases and I don't have the time atm, sorry :'D
+        md_file.create_md_file()
+
+        logger.info('The data was exported successfully.')
+
+    def _write_synopsis(self, md_file, prs, authors, new_authors):
+        md_file.new_header(level=1, title='Synopsis')
         search_url = f'https://github.com/{REPO}/pulls?q='
         search_url += urllib.parse.quote(
-            'is:pr '
-            f'merged:{self.start_date}..{self.end_date}'
+            'is:pr ' f'merged:{self.start_date}..{self.end_date}'
         )
-
-        md_file.write(
-            f'Last week we had '
-        )
+        md_file.write(f'Last week we had ')
         md_file.write(md_file.new_inline_link(
-            search_url,
-            f'{len(prs)} pull requests'
+            search_url, f'{len(prs)} pull requests'
         ))
         md_file.write(
-            f' merged into Django '
-            f'by {len(authors)} different contributors'
+            f' merged into Django by {len(authors)} different contributors'
         )
         if new_authors:
-            md_file.write(
-                f' - including {len(new_authors)} first time '
-                f'contributors! Congratulations to '
-            )
-            for author in new_authors[:-1]:
-                md_file.write(md_file.new_inline_link(
-                    author.get_url(),
-                    # FIXME: for some reason `gh` search doesn't returns a `author.name` 
-                    author.name or author.login
-                ))
-                md_file.write(', ')
-            author = new_authors[-1]
-            md_file.write(
-                'and '
-            )
+            self._write_new_contributors(md_file, new_authors)
+
+
+    def _write_new_contributors(self, md_file, new_authors):
+        md_file.write(
+            f' - including {len(new_authors)} first time '
+            f'contributors! Congratulations to '
+        )
+        for author in new_authors[:-1]:
             md_file.write(md_file.new_inline_link(
                 author.get_url(),
-                # FIXME: for some reason `gh` search doesn't returns a `author.name` 
                 author.name or author.login
             ))
-            md_file.write(
-                f' for having their first commits merged into Django - welcome on board!'
-            )
+            md_file.write(', ')
+        author = new_authors[-1]
+        md_file.write('and ')
+        md_file.write(md_file.new_inline_link(
+            author.get_url(),
+            author.name or author.login
+        ))
+        md_file.write(
+            f' for having their first commits merged into Django - welcome on board!'
+        )
 
+    def _write_release_prs(self, md_file):
         md_file.new_line()
         md_file.new_header(level=1, title='PRs that modified the release file')
         for pr in self.results.get_release_prs():
@@ -278,12 +274,6 @@ class DjangoNewsPRFilter:
                 link=pr.url
             ))
             md_file.new_line()
-
-        md_file.create_md_file()
-
-        logger.info(
-            'The data was exported successfully.'
-        )
 
 
 if __name__ == '__main__':
