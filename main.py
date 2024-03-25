@@ -15,7 +15,6 @@ import urllib.parse
 
 import mdutils
 
-
 REPO = 'django/django'
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_FILE = os.path.join(BASE_DIR, 'OUT.md')
@@ -24,7 +23,6 @@ OUTPUT_FILE = os.path.join(BASE_DIR, 'OUT.md')
 # if django started to average more
 # than 200 merged PRs per week :D 
 PRS_LIMIT = 200
-
 
 logging.basicConfig(
     format="[%(asctime)s - %(name)s - %(levelname)s]: %(message)s",
@@ -42,10 +40,27 @@ def parse_date(datestr):
         )
 
 
+def send_command(command):
+    process = subprocess.Popen(
+        command,
+        shell=True,
+        stdout=subprocess.PIPE
+    )
+    logger.debug(
+        f'{command} was executed.'
+    )
+    output, error = process.communicate()
+
+    if error:
+        raise Exception(error)
+
+    return json.loads(output.decode('utf-8'))
+
+
 @dataclasses.dataclass
 class Author:
     login: str
-    name: str  = dataclasses.field(default=None)
+    name: str = dataclasses.field(default=None)
     is_new: bool = dataclasses.field(default=False)
 
     def get_url(self):
@@ -60,6 +75,7 @@ class File:
     path: str
     additions: int
     deletions: int
+
 
 @dataclasses.dataclass
 class PR:
@@ -95,11 +111,11 @@ class Results:
 
 class DjangoNewsPRFilter:
     def __init__(
-            self, 
-            start_date: datetime.date = None, 
+            self,
+            start_date: datetime.date = None,
             end_date: datetime.date = None,
             output_file: str = OUTPUT_FILE
-        ):
+    ):
 
         self.end_date = end_date
         if not end_date:
@@ -133,21 +149,8 @@ class DjangoNewsPRFilter:
             f'-L {PRS_LIMIT} '
             '--json title,number,url,author,files',
         )
-        process = subprocess.Popen(
-            command,
-            shell=True, 
-            stdout=subprocess.PIPE
-        )
-        logger.debug(
-            f'{command} was executed.'
-        )
-        output, error = process.communicate()
+        response = send_command(command)
 
-        if error:
-            raise Exception(error)
-
-        response = json.loads(output.decode('utf-8'))
-        
         for item in response:
             raw_author = item.pop('author')
             if raw_author['login'] not in map(
@@ -179,7 +182,7 @@ class DjangoNewsPRFilter:
                         deletions=file_deletions
                     )
                 )
-            
+
             item_pr_number = item.get('number')
             item_pr_title = item.get('title')
             item_pr_url = item.get('url')
@@ -206,23 +209,12 @@ class DjangoNewsPRFilter:
             f'-S "is:pr merged:1970-01-01..{self.end_date} author:{login}" '
             '--json number'
         )
-        process = subprocess.Popen(
-            command,
-            shell=True,
-            stdout=subprocess.PIPE
-        )
-        logger.debug(
-            f'{command} was executed.'
-        )
-        output, error = process.communicate()
 
-        if error:
-            raise Exception(error)
+        response = send_command(command)
 
-        response = json.loads(output.decode('utf-8'))
         if len(response) > 1:
             return False
-        
+
         logger.debug(f'{login} is a new contributor!')
         return True
 
@@ -254,7 +246,7 @@ class DjangoNewsPRFilter:
             'is:pr '
             f'merged:{self.start_date}..{self.end_date}'
         )
-        
+
         md_file.write(
             f'Last week we had '
         )
