@@ -84,12 +84,16 @@ class PR:
     url: str
     author: Author
     files: typing.List[File]
+    created: datetime.date = None
 
     def is_release_modified(self) -> bool:
         for file in self.files:
             if 'docs/release' in file.path:
                 return True
         return False
+    def is_old(self, date) -> bool:
+        return self.created < date
+
 
 
 @dataclasses.dataclass
@@ -101,6 +105,12 @@ class Results:
             lambda pr: pr.is_release_modified(),
             self.prs
         ))
+    def get_older_prs(self, date) -> typing.List[PR]:
+        return list(filter(
+            lambda pr: pr.is_old(date),
+            self.prs
+        ))
+
 
     def get_authors(self) -> typing.List[Author]:
         return list(set(pr.author for pr in self.prs))
@@ -147,7 +157,7 @@ class DjangoNewsPRFilter:
             'gh pr list --repo django/django '
             f'-S "is:pr merged:{self.start_date}..{self.end_date}" '
             f'-L {PRS_LIMIT} '
-            '--json title,number,url,author,files',
+            '--json title,number,url,author,files,createdAt',
         )
         response = send_command(command)
 
@@ -183,7 +193,8 @@ class DjangoNewsPRFilter:
         item_pr_number = item.get('number')
         item_pr_title = item.get('title')
         item_pr_url = item.get('url')
-        return PR(title=item_pr_title, number=item_pr_number, url=item_pr_url, author=author, files=files)
+        item_pr_created = datetime.datetime.strptime( item.get('createdAt').split('T')[0], '%Y-%m-%d').date()
+        return PR(title=item_pr_title, number=item_pr_number, url=item_pr_url, author=author, files=files, created=item_pr_created)
 
 
     def _check_new_author(self, login: str) -> bool:
@@ -214,6 +225,8 @@ class DjangoNewsPRFilter:
         logger.info(f'Exporting to {self.output_file}...')
         self._load_prs()
         prs = self.results.prs
+        older_prs = self.results.get_older_prs(self.end_date - datetime.timedelta(days=30 * 6))
+        older_prs_than_3 = self.results.get_older_prs(self.end_date - datetime.timedelta(days=30 * 3))
         authors = self.results.get_authors()
         new_authors = self.results.get_new_authors()
 
@@ -222,6 +235,11 @@ class DjangoNewsPRFilter:
         md_file = mdutils.MdUtils(file_name=self.output_file, title='Updates to Django')
         self._write_synopsis(md_file, prs, authors, new_authors)
         self._write_release_prs(md_file)
+        if len(older_prs)>=1:
+            self._write_old_prs(md_file, older_prs, months=6 )
+        elif len(older_prs_than_3)>=1:
+            self._write_old_prs(md_file, older_prs_than_3, months=3)
+
 
         md_file.create_md_file()
 
@@ -278,6 +296,16 @@ class DjangoNewsPRFilter:
         md_file.new_line()
         md_file.new_header(level=1, title='PRs that modified the release file')
         for pr in self.results.get_release_prs():
+            md_file.write("- ")
+            md_file.write(md_file.new_inline_link(
+                link=pr.url
+            ))
+            md_file.new_line()
+
+    def _write_old_prs(self, md_file, older, months):
+        md_file.new_line()
+        md_file.new_header(level=1, title=f'Older PR{"S" if len(older) >1 else "" } than {months} months')
+        for pr in older:
             md_file.write("- ")
             md_file.write(md_file.new_inline_link(
                 link=pr.url
