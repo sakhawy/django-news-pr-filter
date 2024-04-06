@@ -15,7 +15,6 @@ import urllib.parse
 
 import mdutils
 
-
 REPO = 'django/django'
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_FILE = os.path.join(BASE_DIR, 'OUT.md')
@@ -24,7 +23,6 @@ OUTPUT_FILE = os.path.join(BASE_DIR, 'OUT.md')
 # if django started to average more
 # than 200 merged PRs per week :D 
 PRS_LIMIT = 200
-
 
 logging.basicConfig(
     format="[%(asctime)s - %(name)s - %(levelname)s]: %(message)s",
@@ -42,10 +40,27 @@ def parse_date(datestr):
         )
 
 
+def send_command(command):
+    process = subprocess.Popen(
+        command,
+        shell=True,
+        stdout=subprocess.PIPE
+    )
+    logger.debug(
+        f'{command} was executed.'
+    )
+    output, error = process.communicate()
+
+    if error:
+        raise Exception(error)
+
+    return json.loads(output.decode('utf-8'))
+
+
 @dataclasses.dataclass
 class Author:
     login: str
-    name: str  = dataclasses.field(default=None)
+    name: str = dataclasses.field(default=None)
     is_new: bool = dataclasses.field(default=False)
 
     def get_url(self):
@@ -61,6 +76,7 @@ class File:
     additions: int
     deletions: int
 
+
 @dataclasses.dataclass
 class PR:
     title: str
@@ -68,12 +84,16 @@ class PR:
     url: str
     author: Author
     files: typing.List[File]
+    created: datetime.date = None
 
     def is_release_modified(self) -> bool:
         for file in self.files:
             if 'docs/release' in file.path:
                 return True
         return False
+    def is_old(self, date) -> bool:
+        return self.created < date
+
 
 
 @dataclasses.dataclass
@@ -85,6 +105,12 @@ class Results:
             lambda pr: pr.is_release_modified(),
             self.prs
         ))
+    def get_older_prs(self, date) -> typing.List[PR]:
+        return list(filter(
+            lambda pr: pr.is_old(date),
+            self.prs
+        ))
+
 
     def get_authors(self) -> typing.List[Author]:
         return list(set(pr.author for pr in self.prs))
@@ -95,11 +121,11 @@ class Results:
 
 class DjangoNewsPRFilter:
     def __init__(
-            self, 
-            start_date: datetime.date = None, 
+            self,
+            start_date: datetime.date = None,
             end_date: datetime.date = None,
             output_file: str = OUTPUT_FILE
-        ):
+    ):
 
         self.end_date = end_date
         if not end_date:
@@ -131,70 +157,45 @@ class DjangoNewsPRFilter:
             'gh pr list --repo django/django '
             f'-S "is:pr merged:{self.start_date}..{self.end_date}" '
             f'-L {PRS_LIMIT} '
-            '--json title,number,url,author,files',
+            '--json title,number,url,author,files,createdAt',
         )
-        process = subprocess.Popen(
-            command,
-            shell=True, 
-            stdout=subprocess.PIPE
-        )
-        logger.debug(
-            f'{command} was executed.'
-        )
-        output, error = process.communicate()
+        response = send_command(command)
 
-        if error:
-            raise Exception(error)
-
-        response = json.loads(output.decode('utf-8'))
-        
         for item in response:
             raw_author = item.pop('author')
-            if raw_author['login'] not in map(
-                    lambda author: author.login, self.results.get_authors()):
-                is_new = self._check_new_author(login=raw_author['login'])
-            else:
-                is_new = list(filter(
-                    lambda author: author.login == raw_author['login'],
-                    self.results.get_authors()))[0].is_new
-
-            author_name = raw_author.get('name')
-            author_login = raw_author.get('login')
-            author = Author(
-                login=author_login,
-                name=author_name,
-                is_new=is_new
-            )
-
-            raw_files = item.pop('files')
-            files = []
-            for file in raw_files:
-                file_path = file.get('path')
-                file_additions = file.get('additions')
-                file_deletions = file.get('deletions')
-                files.append(
-                    File(
-                        path=file_path,
-                        additions=file_additions,
-                        deletions=file_deletions
-                    )
-                )
-            
-            item_pr_number = item.get('number')
-            item_pr_title = item.get('title')
-            item_pr_url = item.get('url')
-            pr = PR(
-                title=item_pr_title,
-                number=item_pr_number,
-                url=item_pr_url,
-                author=author,
-                files=files,
-            )
+            author = self._create_author(raw_author)
+            files = self._create_files(item.pop('files'))
+            pr = self._create_pr(item, author, files)
             self.results.prs.append(pr)
 
         logger.info(
             f'{len(self.results.prs)} PRs and related data were loaded.'
         )
+    def _create_author(self, raw_author):
+        author_login = raw_author.get('login')
+        author_name = raw_author.get('name')
+        if author_login not in map(lambda author: author.login, self.results.get_authors()):
+            is_new = self._check_new_author(login=author_login)
+        else:
+            is_new = list(filter(lambda author: author.login == author_login, self.results.get_authors()))[0].is_new
+        return Author(login=author_login, name=author_name, is_new=is_new)
+
+    def _create_files(self, raw_files):
+        files = []
+        for file in raw_files:
+            file_path = file.get('path')
+            file_additions = file.get('additions')
+            file_deletions = file.get('deletions')
+            files.append(File(path=file_path, additions=file_additions, deletions=file_deletions))
+        return files
+
+    def _create_pr(self, item, author, files):
+        item_pr_number = item.get('number')
+        item_pr_title = item.get('title')
+        item_pr_url = item.get('url')
+        item_pr_created = datetime.datetime.strptime( item.get('createdAt').split('T')[0], '%Y-%m-%d').date()
+        return PR(title=item_pr_title, number=item_pr_number, url=item_pr_url, author=author, files=files, created=item_pr_created)
+
 
     def _check_new_author(self, login: str) -> bool:
         # NOTE: for consistency reasons, this checks if
@@ -206,91 +207,92 @@ class DjangoNewsPRFilter:
             f'-S "is:pr merged:1970-01-01..{self.end_date} author:{login}" '
             '--json number'
         )
-        process = subprocess.Popen(
-            command,
-            shell=True,
-            stdout=subprocess.PIPE
-        )
-        logger.debug(
-            f'{command} was executed.'
-        )
-        output, error = process.communicate()
 
-        if error:
-            raise Exception(error)
+        response = send_command(command)
 
-        response = json.loads(output.decode('utf-8'))
         if len(response) > 1:
             return False
-        
+
         logger.debug(f'{login} is a new contributor!')
         return True
 
     def export_md(self):
         """
         Exports the data into a .md file.
-        
+
         (very messy, should've just used normal file IO!)
         """
-        logger.info(
-            f'Exporting to {self.output_file}...'
-        )
+        logger.info(f'Exporting to {self.output_file}...')
         self._load_prs()
         prs = self.results.prs
+        older_prs = self.results.get_older_prs(self.end_date - datetime.timedelta(days=30 * 6))
+        older_prs_than_3 = self.results.get_older_prs(self.end_date - datetime.timedelta(days=30 * 3))
         authors = self.results.get_authors()
         new_authors = self.results.get_new_authors()
 
-        logger.debug(
-            new_authors
-        )
+        logger.debug(new_authors)
 
         md_file = mdutils.MdUtils(file_name=self.output_file, title='Updates to Django')
-        md_file.new_header(level=1, title='Synopsis')
+        self._write_synopsis(md_file, prs, authors, new_authors)
+        self._write_release_prs(md_file)
+        if len(older_prs)>=1:
+            self._write_old_prs(md_file, older_prs, months=6 )
+        elif len(older_prs_than_3)>=1:
+            self._write_old_prs(md_file, older_prs_than_3, months=3)
 
-        # FIXME: this can get weird if we have few contributors!
-        # too many edge cases and I don't have the time atm, sorry :'D
+
+        md_file.create_md_file()
+
+        logger.info('The data was exported successfully.')
+
+    def _write_synopsis(self, md_file, prs, authors, new_authors):
+        md_file.new_header(level=1, title='Synopsis')
         search_url = f'https://github.com/{REPO}/pulls?q='
         search_url += urllib.parse.quote(
-            'is:pr '
-            f'merged:{self.start_date}..{self.end_date}'
+            'is:pr ' f'merged:{self.start_date}..{self.end_date}'
         )
-        
-        md_file.write(
-            f'Last week we had '
-        )
+        md_file.write(f'Last week we had ')
         md_file.write(md_file.new_inline_link(
-            search_url,
-            f'{len(prs)} pull requests'
+            search_url, f'{len(prs)} pull requests'
         ))
         md_file.write(
-            f' merged into Django '
-            f'by {len(authors)} different contributors'
+            f' merged into Django by {len(authors)} different contributors'
         )
         if new_authors:
-            md_file.write(
-                f' - including {len(new_authors)} first time '
-                f'contributors! Congratulations to '
-            )
-            for author in new_authors[:-1]:
-                md_file.write(md_file.new_inline_link(
-                    author.get_url(),
-                    # FIXME: for some reason `gh` search doesn't returns a `author.name` 
-                    author.name or author.login
-                ))
-                md_file.write(', ')
-            author = new_authors[-1]
-            md_file.write(
-                'and '
-            )
-            md_file.write(md_file.new_inline_link(
-                author.get_url(),
-                # FIXME: for some reason `gh` search doesn't returns a `author.name` 
-                author.name or author.login
-            ))
-            md_file.write(
-                f' for having their first commits merged into Django - welcome on board!'
-            )
+            self._write_new_contributors(md_file, new_authors)
+        else:
+            md_file.new_line()
+            md_file.new_line()
+            md_file.write(f' [comment]: <> (This is a comment. No new contributors :( )')
 
+
+    def _write_new_contributors(self, md_file, new_authors):
+        num_new_authors = len(new_authors)
+        md_file.write(
+            f' - including {num_new_authors} first-time contributor{"s" if num_new_authors > 1 else ""}! Congratulations to ')
+        if num_new_authors == 1:
+            md_file.write(
+                md_file.new_inline_link(new_authors[0].get_url(), new_authors[0].name or new_authors[0].login))
+
+        elif num_new_authors == 2:
+            md_file.write(
+                md_file.new_inline_link(new_authors[0].get_url(), new_authors[0].name or new_authors[0].login))
+            md_file.write(f' and ')
+            md_file.write(
+                md_file.new_inline_link(new_authors[1].get_url(), new_authors[1].name or new_authors[1].login))
+
+        else:
+            for author in new_authors[:-1]:
+                md_file.write(md_file.new_inline_link(author.get_url(), author.name or author.login))
+                md_file.write(', ')
+            md_file.write('and ')
+            md_file.write(
+                md_file.new_inline_link(new_authors[-1].get_url(), new_authors[-1].name or new_authors[-1].login))
+
+        md_file.write(f' for having their first commits merged into Django - welcome on board!')
+
+
+    def _write_release_prs(self, md_file):
         md_file.new_line()
         md_file.new_header(level=1, title='PRs that modified the release file')
         for pr in self.results.get_release_prs():
@@ -300,11 +302,15 @@ class DjangoNewsPRFilter:
             ))
             md_file.new_line()
 
-        md_file.create_md_file()
-
-        logger.info(
-            'The data was exported successfully.'
-        )
+    def _write_old_prs(self, md_file, older, months):
+        md_file.new_line()
+        md_file.new_header(level=1, title=f'Older PR{"S" if len(older) >1 else "" } than {months} months')
+        for pr in older:
+            md_file.write("- ")
+            md_file.write(md_file.new_inline_link(
+                link=pr.url
+            ))
+            md_file.new_line()
 
 
 if __name__ == '__main__':
