@@ -66,6 +66,9 @@ class Author:
     def get_url(self):
         return f'https://github.com/{self.login}'
 
+    def get_name_or_login(self):
+        return self.name or self.login
+
     def __hash__(self) -> str:
         return hash(self.login)
 
@@ -91,9 +94,9 @@ class PR:
             if 'docs/release' in file.path:
                 return True
         return False
+
     def is_old(self, date) -> bool:
         return self.created < date
-
 
 
 @dataclasses.dataclass
@@ -105,12 +108,12 @@ class Results:
             lambda pr: pr.is_release_modified(),
             self.prs
         ))
+
     def get_older_prs(self, date) -> typing.List[PR]:
         return list(filter(
             lambda pr: pr.is_old(date),
             self.prs
         ))
-
 
     def get_authors(self) -> typing.List[Author]:
         return list(set(pr.author for pr in self.prs))
@@ -171,6 +174,7 @@ class DjangoNewsPRFilter:
         logger.info(
             f'{len(self.results.prs)} PRs and related data were loaded.'
         )
+
     def _create_author(self, raw_author):
         author_login = raw_author.get('login')
         author_name = raw_author.get('name')
@@ -193,9 +197,9 @@ class DjangoNewsPRFilter:
         item_pr_number = item.get('number')
         item_pr_title = item.get('title')
         item_pr_url = item.get('url')
-        item_pr_created = datetime.datetime.strptime( item.get('createdAt').split('T')[0], '%Y-%m-%d').date()
-        return PR(title=item_pr_title, number=item_pr_number, url=item_pr_url, author=author, files=files, created=item_pr_created)
-
+        item_pr_created = datetime.datetime.strptime(item.get('createdAt').split('T')[0], '%Y-%m-%d').date()
+        return PR(title=item_pr_title, number=item_pr_number, url=item_pr_url, author=author, files=files,
+                  created=item_pr_created)
 
     def _check_new_author(self, login: str) -> bool:
         # NOTE: for consistency reasons, this checks if
@@ -235,11 +239,10 @@ class DjangoNewsPRFilter:
         md_file = mdutils.MdUtils(file_name=self.output_file, title='Updates to Django')
         self._write_synopsis(md_file, prs, authors, new_authors)
         self._write_release_prs(md_file)
-        if len(older_prs)>=1:
-            self._write_old_prs(md_file, older_prs, months=6 )
-        elif len(older_prs_than_3)>=1:
+        if len(older_prs) >= 1:
+            self._write_old_prs(md_file, older_prs, months=6)
+        elif len(older_prs_than_3) >= 1:
             self._write_old_prs(md_file, older_prs_than_3, months=3)
-
 
         md_file.create_md_file()
 
@@ -265,6 +268,12 @@ class DjangoNewsPRFilter:
             md_file.new_line()
             md_file.write(f' [comment]: <> (This is a comment. No new contributors :( )')
 
+    def _latest_new_contributors(self, md_file, authors):
+        md_file.write(
+            md_file.new_inline_link(authors[-2].get_url(), authors[-2].get_name_or_login()))
+        md_file.write(' and ')
+        md_file.write(
+            md_file.new_inline_link(authors[-1].get_url(), authors[-1].get_name_or_login()))
 
     def _write_new_contributors(self, md_file, new_authors):
         num_new_authors = len(new_authors)
@@ -272,25 +281,17 @@ class DjangoNewsPRFilter:
             f' - including {num_new_authors} first-time contributor{"s" if num_new_authors > 1 else ""}! Congratulations to ')
         if num_new_authors == 1:
             md_file.write(
-                md_file.new_inline_link(new_authors[0].get_url(), new_authors[0].name or new_authors[0].login))
+                md_file.new_inline_link(new_authors[0].get_url(), new_authors[0].get_name_or_login()))
 
         elif num_new_authors == 2:
-            md_file.write(
-                md_file.new_inline_link(new_authors[0].get_url(), new_authors[0].name or new_authors[0].login))
-            md_file.write(f' and ')
-            md_file.write(
-                md_file.new_inline_link(new_authors[1].get_url(), new_authors[1].name or new_authors[1].login))
+            self._latest_new_contributors(md_file, new_authors)
 
         else:
-            for author in new_authors[:-1]:
-                md_file.write(md_file.new_inline_link(author.get_url(), author.name or author.login))
+            for author in new_authors[:-2]:
+                md_file.write(md_file.new_inline_link(author.get_url(), author.get_name_or_login()))
                 md_file.write(', ')
-            md_file.write('and ')
-            md_file.write(
-                md_file.new_inline_link(new_authors[-1].get_url(), new_authors[-1].name or new_authors[-1].login))
-
-        md_file.write(f' for having their first commits merged into Django - welcome on board!')
-
+            self._latest_new_contributors(md_file, new_authors)
+        md_file.write(' for having their first commits merged into Django - welcome on board!')
 
     def _write_release_prs(self, md_file):
         md_file.new_line()
@@ -304,7 +305,7 @@ class DjangoNewsPRFilter:
 
     def _write_old_prs(self, md_file, older, months):
         md_file.new_line()
-        md_file.new_header(level=1, title=f'Older PR{"S" if len(older) >1 else "" } than {months} months')
+        md_file.new_header(level=1, title=f'Older PR{"S" if len(older) > 1 else ""} than {months} months')
         for pr in older:
             md_file.write("- ")
             md_file.write(md_file.new_inline_link(
