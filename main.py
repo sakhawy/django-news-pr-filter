@@ -278,7 +278,7 @@ class DjangoNewsPRFilter:
     def _write_new_contributors(self, md_file, new_authors):
         num_new_authors = len(new_authors)
         md_file.write(
-            f' - including {num_new_authors} first-time contributor{"s" if num_new_authors > 1 else ""}! Congratulations to ')
+            f' - including {"a" if num_new_authors == 1 else num_new_authors} first-time contributor{"s" if num_new_authors > 1 else ""}! Congratulations to ')
         if num_new_authors == 1:
             md_file.write(
                 md_file.new_inline_link(new_authors[0].get_url(), new_authors[0].get_name_or_login()))
