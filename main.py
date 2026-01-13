@@ -88,10 +88,12 @@ class PR:
     author: Author
     files: typing.List[File]
     created: datetime.date = None
+    release: str = None
 
     def is_release_modified(self) -> bool:
         for file in self.files:
             if 'docs/release' in file.path:
+                self.release = file.path.replace('docs/releases/', '')[:-4]
                 return True
         return False
 
@@ -299,8 +301,15 @@ class DjangoNewsPRFilter:
         for pr in self.results.get_release_prs():
             md_file.write("- ")
             md_file.write(md_file.new_inline_link(
-                link=pr.url
+                link=pr.url,
+                text=str(pr.title)
             ))
+            md_file.new_line()
+            md_file.write(md_file.new_inline_link(
+                link=f'https://django--{pr.number}.org.readthedocs.build/en/{pr.number}/releases/{pr.release}.html',
+                text='See this PR inside the docs.'
+            ))
+            md_file.new_line()
             md_file.new_line()
 
     def _write_old_prs(self, md_file, older, months):
